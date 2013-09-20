@@ -1,0 +1,41 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+	echo "USAGE: dnssync CONFIG_FILE"
+	exit
+fi;
+
+source $1
+
+if [ -n "$(find /etc/bind/ -newer $lastfile)" ] || [ $lastfile == "" ]; then
+	$logger "Updating remote..."
+
+	files=""
+	binddir=$(dirname $config)
+	binddire="$(echo $binddir|sed -e 's/\//\\\//g')\/"
+
+	if [ ! -e $tmpdir ]; then
+		mkdir $tmpdir
+	fi;
+
+	while read line; do
+		file=$(echo "$line"|cut -d'"' -f2|sed -e "s/$binddire//g")
+		mkdir -p $(dirname $tmpdir/$file)
+		cp $binddir/$file $tmpdir/$file
+	done < <(grep file "$config")
+	sed -e "s/$binddire/${binddire}dnssync\//g" $config > $tmpdir/named.conf.remote
+
+	for server in $servers; do
+		cred=$(echo $server|cut -d'@' -f1)
+		srv=$(echo $server|cut -d'@' -f2)
+		host=$(echo $srv|cut -d':' -f1)
+		port=$(echo $srv|cut -d':' -f2)
+		user=$(echo $cred|cut -d':' -f1)
+		pass=$(echo $cred|cut -d':' -f2)
+		$logger " -> $user@$host"
+		base=$(dirname $config)
+		rsync -avzEq --inplace --rsh="sshpass -p $pass ssh -p $port" $tmpdir/ $user@$host:$remote_dir
+	done
+fi;
+
+touch -d '-60 seconds' $lastfile
